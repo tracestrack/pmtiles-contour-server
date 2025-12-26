@@ -1,11 +1,11 @@
 {
-  "name": "pmtiles-contour-server",
+  "name": "@tracestrack/pmtiles-contour-server",
   "version": "1.0.0",
   "description": "Express server that generates contour vector tiles from DEM PMTiles with seamless tile boundaries",
   "main": "server.js",
   "type": "module",
   "bin": {
-    "pmtiles-contour-server": "./cli.js"
+    "pmtiles-contour-server": "./bin/pmtiles-contour-server"
   },
   "scripts": {
     "start": "node server.js",

@@ -1,0 +1,16 @@
+*.swp
+node_modules/
+test/
+.travis.yml
+.github/
+.vscode/
+.idea/
+coverage/
+.nyc_output/
+*.log
+.env
+.env.local
+*.pmtiles
+*.mbtiles
+test-*.js
+PUBLISHING.md
