@@ -1,16 +1,42 @@
 {
   "name": "pmtiles-contour-server",
   "version": "1.0.0",
-  "description": "Express server that generates contour vector tiles from DEM PMTiles",
+  "description": "Express server that generates contour vector tiles from DEM PMTiles with seamless tile boundaries",
   "main": "server.js",
   "type": "module",
+  "bin": {
+    "pmtiles-contour-server": "./cli.js"
+  },
   "scripts": {
     "start": "node server.js",
     "test": "node test-tilejson.js"
   },
-  "keywords": ["pmtiles", "contour", "dem", "mvt", "express"],
-  "author": "",
+  "keywords": [
+    "pmtiles",
+    "contour",
+    "dem",
+    "mvt",
+    "mapbox-vector-tiles",
+    "terrain",
+    "elevation",
+    "topography",
+    "express",
+    "gis",
+    "maps"
+  ],
+  "author": "TracesTrack",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tracestrack/pmtiles-contour-server.git"
+  },
+  "bugs": {
+    "url": "https://github.com/tracestrack/pmtiles-contour-server/issues"
+  },
+  "homepage": "https://github.com/tracestrack/pmtiles-contour-server#readme",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "dependencies": {
     "express": "^4.18.2",
     "pmtiles": "^3.0.0",
