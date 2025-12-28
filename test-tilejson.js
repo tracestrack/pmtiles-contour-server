@@ -5,14 +5,16 @@
  *
  * Usage:
  *   node test-tilejson.js
- *   TILEJSON_URL=http://localhost:3000/tilejson.json node test-tilejson.js
+ *   TILEJSON_URL=http://localhost:8099/terrain-rgb.json TILE_URL=http://localhost:8099/terrain-rgb/11/1058/687.mvt node test-tilejson.js
+ *
+ * Note: Update the tileset name in the URLs to match your actual tileset
  */
 
 import { VectorTile } from '@mapbox/vector-tile';
 import Pbf from 'pbf';
 
-const TILEJSON_URL = process.env.TILEJSON_URL || 'http://localhost:8099/tilejson.json';
-const TILE_URL = process.env.TILE_URL || 'http://localhost:8099/11/1058/687.mvt';
+const TILEJSON_URL = process.env.TILEJSON_URL || 'http://localhost:8099/dtm_global.json';
+const TILE_URL = process.env.TILE_URL || 'http://localhost:8099/dtm_global/11/1058/687.mvt';
 
 async function testMVT() {
   console.log('\n🧪 Testing MVT tile endpoint...\n');

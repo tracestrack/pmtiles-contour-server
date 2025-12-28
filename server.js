@@ -5,16 +5,31 @@ import { contours } from 'd3-contour';
 import geojsonvt from 'geojson-vt';
 import vtpbf from 'vt-pbf';
 import sharp from 'sharp';
-import { open } from 'fs/promises';
-import { resolve } from 'path';
+import { open, readdir, stat } from 'fs/promises';
+import { resolve, join, basename, extname } from 'path';
 
 // Parse command line arguments
 const args = process.argv.slice(2);
-const pmtilesPath = args[0];
+const pmtilesDir = args[0];
 
-if (!pmtilesPath) {
-  console.error('Usage: node server.js <path-to-pmtiles-file>');
-  console.error('Example: node server.js ./terrain-rgb.pmtiles');
+if (!pmtilesDir) {
+  console.error('Usage: node server.js <path-to-directory>');
+  console.error('Example: node server.js ./pmtiles-data');
+  process.exit(1);
+}
+
+// Validate that the path is a directory
+const pmtilesDirPath = resolve(pmtilesDir);
+try {
+  const stats = await stat(pmtilesDirPath);
+  if (!stats.isDirectory()) {
+    console.error(`Error: ${pmtilesDir} is not a directory`);
+    console.error('Please provide a path to a directory containing .pmtiles files');
+    process.exit(1);
+  }
+} catch (error) {
+  console.error(`Error: Cannot access ${pmtilesDir}`);
+  console.error(error.message);
   process.exit(1);
 }
 
@@ -26,6 +41,32 @@ const MAJOR_INTERVAL = parseInt(process.env.MAJOR_INTERVAL || '50'); // meters
 
 // Note: Tile dimensions are read from the actual DEM image (imageData.width/height)
 // Common sizes are 256x256 or 512x512 pixels
+
+// Load all PMTiles files from a directory
+async function loadPMTiles(directory) {
+  const files = await readdir(directory);
+  const pmtilesFiles = files.filter(file => extname(file).toLowerCase() === '.pmtiles');
+
+  if (pmtilesFiles.length === 0) {
+    console.error(`Error: No .pmtiles files found in ${directory}`);
+    console.error('Please ensure the directory contains at least one .pmtiles file');
+    process.exit(1);
+  }
+
+  const tilesets = new Map();
+
+  for (const file of pmtilesFiles) {
+    const filePath = join(directory, file);
+    const tilesetName = basename(file, '.pmtiles');
+    const fileSource = new FileSource(filePath);
+    const pmtiles = new PMTiles(fileSource);
+
+    tilesets.set(tilesetName, pmtiles);
+    console.log(`Loaded tileset: ${tilesetName} (${file})`);
+  }
+
+  return tilesets;
+}
 
 // Custom FileSource for reading local PMTiles files
 class FileSource {
@@ -61,9 +102,8 @@ class FileSource {
   }
 }
 
-// Initialize PMTiles with FileSource for local files
-const fileSource = new FileSource(pmtilesPath);
-const pmtiles = new PMTiles(fileSource);
+// Load all PMTiles files from the directory
+const tilesets = await loadPMTiles(pmtilesDirPath);
 
 // Decode image from tile buffer (supports PNG, WebP, JPEG)
 async function decodeImage(buffer) {
@@ -389,14 +429,73 @@ function clipContoursToTile(contourFeatures, tileWidth, tileHeight, buffer) {
   return clippedFeatures;
 }
 
-// Tile request handler
-app.get('/:z/:x/:y.mvt', async (req, res) => {
+// Catalog endpoint - list all available tilesets
+app.get('/', async (req, res) => {
   try {
+    const host = req.get('host');
+    const protocol = req.protocol;
+    const baseUrl = `${protocol}://${host}`;
+
+    const catalog = [];
+
+    for (const [name, pmtiles] of tilesets) {
+      try {
+        const header = await pmtiles.getHeader();
+        const metadata = await pmtiles.getMetadata();
+
+        catalog.push({
+          name,
+          tilejson: `${baseUrl}/${name}.json`,
+          tiles: `${baseUrl}/${name}/{z}/{x}/{y}.mvt`,
+          bounds: [
+            header.minLon || -180,
+            header.minLat || -85.0511,
+            header.maxLon || 180,
+            header.maxLat || 85.0511
+          ],
+          minzoom: header.minZoom || 0,
+          maxzoom: header.maxZoom || 14,
+          description: metadata?.description || 'Contour lines generated from DEM data'
+        });
+      } catch (error) {
+        console.error(`Error reading metadata for ${name}:`, error);
+        catalog.push({
+          name,
+          error: 'Failed to read metadata',
+          tilejson: `${baseUrl}/${name}.json`
+        });
+      }
+    }
+
+    res.json({
+      tilesets: catalog,
+      count: tilesets.size
+    });
+  } catch (error) {
+    console.error('Error generating catalog:', error);
+    res.status(500).json({ error: 'Failed to generate catalog' });
+  }
+});
+
+// Tile request handler
+app.get('/:tileset/:z/:x/:y.mvt', async (req, res) => {
+  try {
+    const tileset = req.params.tileset;
     const z = parseInt(req.params.z);
     const x = parseInt(req.params.x);
     const y = parseInt(req.params.y);
 
-    console.log(`Requesting tile: ${z}/${x}/${y}`);
+    // Lookup PMTiles instance
+    const pmtiles = tilesets.get(tileset);
+    if (!pmtiles) {
+      return res.status(404).json({
+        error: 'Tileset not found',
+        tileset,
+        available: Array.from(tilesets.keys())
+      });
+    }
+
+    console.log(`Requesting tile: ${tileset}/${z}/${x}/${y}`);
 
     // Fetch tile with neighbors
     const { tiles, positions } = await fetchTileWithBuffer(pmtiles, z, x, y);
@@ -446,8 +545,20 @@ app.get('/:z/:x/:y.mvt', async (req, res) => {
 });
 
 // TileJSON endpoint
-app.get('/tilejson.json', async (req, res) => {
+app.get('/:tileset.json', async (req, res) => {
   try {
+    const tileset = req.params.tileset;
+
+    // Lookup PMTiles instance
+    const pmtiles = tilesets.get(tileset);
+    if (!pmtiles) {
+      return res.status(404).json({
+        error: 'Tileset not found',
+        tileset,
+        available: Array.from(tilesets.keys())
+      });
+    }
+
     const metadata = await pmtiles.getMetadata();
     const header = await pmtiles.getHeader();
 
@@ -457,11 +568,11 @@ app.get('/tilejson.json', async (req, res) => {
 
     const tilejson = {
       tilejson: '3.0.0',
-      name: 'Contour Lines',
+      name: metadata?.name || tileset,
       description: 'Contour lines generated from DEM data',
       version: '1.0.0',
       scheme: 'xyz',
-      tiles: [`${baseUrl}/{z}/{x}/{y}.mvt`],
+      tiles: [`${baseUrl}/${tileset}/{z}/{x}/{y}.mvt`],
       minzoom: header.minZoom || 0,
       maxzoom: header.maxZoom || 14,
       bounds: [
@@ -499,17 +610,33 @@ app.get('/tilejson.json', async (req, res) => {
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', pmtiles: pmtilesPath });
+  res.json({
+    status: 'ok',
+    directory: pmtilesDirPath,
+    tilesets: Array.from(tilesets.keys()),
+    count: tilesets.size
+  });
 });
 
 // Start server
 app.listen(PORT, () => {
   console.log(`PMTiles Contour Server running on port ${PORT}`);
-  console.log(`PMTiles file: ${pmtilesPath}`);
+  console.log(`Directory: ${pmtilesDirPath}`);
+  console.log(`Tilesets loaded: ${tilesets.size}`);
+  for (const name of tilesets.keys()) {
+    console.log(`  - ${name}`);
+  }
   console.log(`Encoding: ${ENCODING}`);
   console.log(`Contour interval: ${CONTOUR_INTERVAL}m (major: ${MAJOR_INTERVAL}m)`);
   console.log(`\nEndpoints:`);
-  console.log(`  TileJSON: http://localhost:${PORT}/tilejson.json`);
-  console.log(`  Tiles: http://localhost:${PORT}/{z}/{x}/{y}.mvt`);
+  console.log(`  Catalog: http://localhost:${PORT}/`);
+  console.log(`  TileJSON: http://localhost:${PORT}/{tileset}.json`);
+  console.log(`  Tiles: http://localhost:${PORT}/{tileset}/{z}/{x}/{y}.mvt`);
   console.log(`  Health: http://localhost:${PORT}/health`);
+  if (tilesets.size > 0) {
+    const firstTileset = Array.from(tilesets.keys())[0];
+    console.log(`\nExample URLs (using "${firstTileset}"):`);
+    console.log(`  http://localhost:${PORT}/${firstTileset}.json`);
+    console.log(`  http://localhost:${PORT}/${firstTileset}/12/2048/2048.mvt`);
+  }
 });

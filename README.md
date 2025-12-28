@@ -23,13 +23,17 @@ npm install
 ### Basic Usage
 
 ```bash
-node server.js <path-to-pmtiles-file>
+node server.js <path-to-directory>
 ```
+
+The server will scan the directory for all `.pmtiles` files and serve them as separate tilesets.
 
 Example:
 ```bash
-node server.js ./terrain-rgb.pmtiles
+node server.js ./pmtiles-data
 ```
+
+If you have `terrain-rgb.pmtiles` and `hillshade.pmtiles` in the directory, they will be available as tilesets named `terrain-rgb` and `hillshade`.
 
 ### Environment Variables
 
@@ -42,7 +46,7 @@ Configure the server behavior with these environment variables:
 
 Example:
 ```bash
-PORT=8080 ENCODING=mapbox CONTOUR_INTERVAL=20 node server.js ./terrain.pmtiles
+PORT=8080 ENCODING=mapbox CONTOUR_INTERVAL=20 node server.js ./pmtiles-data
 ```
 
 ### Testing
@@ -51,7 +55,7 @@ A smoke test is included to verify the TileJSON endpoint is working correctly.
 
 1. Start the server:
 ```bash
-PORT=8099 CONTOUR_INTERVAL=20 node server.js /home/clear/dev/whitebox/maps/mapdata/dtm_global.pmtiles
+PORT=8099 CONTOUR_INTERVAL=20 node server.js /path/to/pmtiles-directory
 ```
 
 2. Run the test (in a separate terminal):
@@ -70,24 +74,49 @@ The test will verify:
 
 **Customize test URLs:**
 ```bash
-TILEJSON_URL=http://localhost:3000/tilejson.json TILE_URL=http://localhost:3000/5/15/10.mvt npm test
+TILEJSON_URL=http://localhost:8099/terrain-rgb.json TILE_URL=http://localhost:8099/terrain-rgb/11/1058/687.mvt npm test
 ```
 
-The MVT test uses tile coordinate 0/0/0 by default, but you can specify a different tile using the `TILE_URL` environment variable.
+Note: Replace `terrain-rgb` with your actual tileset name.
 
 ## API Endpoints
 
-### GET /tilejson.json
+### GET /
 
-Returns TileJSON metadata describing the tileset.
+Catalog endpoint that lists all available tilesets.
+
+**Response:**
+```json
+{
+  "tilesets": [
+    {
+      "name": "terrain-rgb",
+      "tilejson": "http://localhost:3000/terrain-rgb.json",
+      "tiles": "http://localhost:3000/terrain-rgb/{z}/{x}/{y}.mvt",
+      "bounds": [-180, -85.0511, 180, 85.0511],
+      "minzoom": 0,
+      "maxzoom": 14,
+      "description": "Contour lines generated from DEM data"
+    }
+  ],
+  "count": 1
+}
+```
+
+### GET /:tileset.json
+
+Returns TileJSON metadata for a specific tileset.
+
+**Parameters:**
+- `tileset` - Name of the tileset (filename without `.pmtiles` extension)
 
 **Response:**
 ```json
 {
   "tilejson": "3.0.0",
-  "name": "Contour Lines",
+  "name": "terrain-rgb",
   "description": "Contour lines generated from DEM data",
-  "tiles": ["http://localhost:3000/{z}/{x}/{y}.mvt"],
+  "tiles": ["http://localhost:3000/terrain-rgb/{z}/{x}/{y}.mvt"],
   "minzoom": 0,
   "maxzoom": 14,
   "bounds": [-180, -85.0511, 180, 85.0511],
@@ -105,11 +134,17 @@ Returns TileJSON metadata describing the tileset.
 }
 ```
 
-### GET /:z/:x/:y.mvt
+**Example:**
+```
+http://localhost:3000/terrain-rgb.json
+```
 
-Retrieves a contour vector tile for the specified coordinates.
+### GET /:tileset/:z/:x/:y.mvt
+
+Retrieves a contour vector tile for the specified tileset and coordinates.
 
 **Parameters:**
+- `tileset` - Name of the tileset
 - `z` - Zoom level
 - `x` - Tile X coordinate
 - `y` - Tile Y coordinate
@@ -124,7 +159,7 @@ Retrieves a contour vector tile for the specified coordinates.
 
 **Example:**
 ```
-http://localhost:3000/12/2048/2048.mvt
+http://localhost:3000/terrain-rgb/12/2048/2048.mvt
 ```
 
 ### GET /health
@@ -135,7 +170,9 @@ Health check endpoint.
 ```json
 {
   "status": "ok",
-  "pmtiles": "/path/to/file.pmtiles"
+  "directory": "/path/to/pmtiles-directory",
+  "tilesets": ["terrain-rgb", "hillshade"],
+  "count": 2
 }
 ```
 
@@ -161,10 +198,10 @@ Used by:
 ### Option 1: Using TileJSON (Recommended)
 
 ```javascript
-// Add source using TileJSON endpoint
+// Add source using TileJSON endpoint (replace 'terrain-rgb' with your tileset name)
 map.addSource('contours', {
   type: 'vector',
-  url: 'http://localhost:3000/tilejson.json'
+  url: 'http://localhost:3000/terrain-rgb.json'
 });
 
 // Add contour line layer
@@ -200,10 +237,10 @@ map.addLayer({
 ### Option 2: Using Direct Tile URLs
 
 ```javascript
-// Add source with direct tile URLs
+// Add source with direct tile URLs (replace 'terrain-rgb' with your tileset name)
 map.addSource('contours', {
   type: 'vector',
-  tiles: ['http://localhost:3000/{z}/{x}/{y}.mvt'],
+  tiles: ['http://localhost:3000/terrain-rgb/{z}/{x}/{y}.mvt'],
   minzoom: 0,
   maxzoom: 14
 });

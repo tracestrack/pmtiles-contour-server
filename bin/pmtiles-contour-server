@@ -7,8 +7,8 @@ import { dirname, join } from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Start the server
-const serverPath = join(__dirname, 'server.js');
+// Start the server (server.js is in parent directory)
+const serverPath = join(__dirname, '..', 'server.js');
 const child = spawn('node', [serverPath, ...process.argv.slice(2)], {
   stdio: 'inherit',
   env: process.env
