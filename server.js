@@ -9,12 +9,108 @@ import { open, readdir, stat } from 'fs/promises';
 import { resolve, join, basename, extname } from 'path';
 
 // Parse command line arguments
-const args = process.argv.slice(2);
-const pmtilesDir = args[0];
+function parseArgs(argv) {
+  const args = {
+    directory: null,
+    publicUrl: null,
+    cors: null,
+    help: false
+  };
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+
+    if (arg === '--help' || arg === '-h') {
+      args.help = true;
+    } else if (arg === '--public-url') {
+      if (i + 1 >= argv.length) {
+        console.error('Error: --public-url requires a URL argument');
+        process.exit(1);
+      }
+      args.publicUrl = argv[i + 1];
+      i++; // Skip next argument
+    } else if (arg === '--cors') {
+      if (i + 1 >= argv.length) {
+        console.error('Error: --cors requires an origin argument');
+        process.exit(1);
+      }
+      args.cors = argv[i + 1];
+      i++; // Skip next argument
+    } else if (!arg.startsWith('-')) {
+      if (!args.directory) {
+        args.directory = arg;
+      } else {
+        console.error(`Error: Unexpected argument "${arg}"`);
+        process.exit(1);
+      }
+    } else {
+      console.error(`Error: Unknown option "${arg}"`);
+      process.exit(1);
+    }
+  }
+
+  return args;
+}
+
+function showHelp() {
+  console.log(`
+PMTiles Contour Server
+Generate contour vector tiles from DEM PMTiles with seamless tile boundaries
+
+USAGE:
+  pmtiles-contour-server [OPTIONS] <directory>
+  node server.js [OPTIONS] <directory>
+
+ARGUMENTS:
+  <directory>              Path to directory containing .pmtiles files
+
+OPTIONS:
+  --help, -h               Show this help message
+  --public-url <url>       Base URL for tile endpoints (e.g., https://tiles.example.com)
+                          If not specified, uses the request host
+  --cors <origin>          CORS origin configuration
+                          "*" allows all origins (default)
+                          Specific origin: "https://example.com"
+                          Multiple origins: "https://example.com,https://other.com"
+
+ENVIRONMENT VARIABLES:
+  PORT                     Server port (default: 3000)
+  ENCODING                 DEM encoding: 'terrarium' or 'mapbox' (default: 'terrarium')
+  CONTOUR_INTERVAL         Contour line interval in meters (default: 10)
+  MAJOR_INTERVAL           Major contour interval in meters (default: 50)
+
+EXAMPLES:
+  # Start server with default settings
+  pmtiles-contour-server ./pmtiles-data
+
+  # Use custom public URL for tile endpoints
+  pmtiles-contour-server --public-url https://tiles.example.com ./pmtiles-data
+
+  # Allow specific origin for CORS
+  pmtiles-contour-server --cors https://example.com ./pmtiles-data
+
+  # Allow multiple origins for CORS
+  pmtiles-contour-server --cors "https://example.com,https://other.com" ./pmtiles-data
+
+  # Use custom port and contour interval
+  PORT=8080 CONTOUR_INTERVAL=20 pmtiles-contour-server ./pmtiles-data
+`);
+}
+
+const parsedArgs = parseArgs(process.argv.slice(2));
+
+if (parsedArgs.help) {
+  showHelp();
+  process.exit(0);
+}
+
+const pmtilesDir = parsedArgs.directory;
+const publicUrl = parsedArgs.publicUrl;
+const corsOrigin = parsedArgs.cors;
 
 if (!pmtilesDir) {
-  console.error('Usage: node server.js <path-to-directory>');
-  console.error('Example: node server.js ./pmtiles-data');
+  console.error('Error: Missing required argument <directory>');
+  console.error('Run with --help for usage information');
   process.exit(1);
 }
 
@@ -252,8 +348,26 @@ function encodeMVT(contourFeatures, width, height, z, x, y) {
 // Initialize Express
 const app = express();
 
-// Enable CORS for all routes
-app.use(cors());
+// Configure CORS
+let corsOptions;
+if (corsOrigin) {
+  if (corsOrigin === '*') {
+    // Allow all origins
+    corsOptions = { origin: '*' };
+  } else if (corsOrigin.includes(',')) {
+    // Multiple origins - split by comma and trim whitespace
+    const origins = corsOrigin.split(',').map(o => o.trim());
+    corsOptions = { origin: origins };
+  } else {
+    // Single origin
+    corsOptions = { origin: corsOrigin };
+  }
+} else {
+  // Default: allow all origins
+  corsOptions = { origin: '*' };
+}
+
+app.use(cors(corsOptions));
 
 // Fetch tile with neighbors for buffered contour generation
 async function fetchTileWithBuffer(pmtiles, z, x, y) {
@@ -432,9 +546,7 @@ function clipContoursToTile(contourFeatures, tileWidth, tileHeight, buffer) {
 // Catalog endpoint - list all available tilesets
 app.get('/', async (req, res) => {
   try {
-    const host = req.get('host');
-    const protocol = req.protocol;
-    const baseUrl = `${protocol}://${host}`;
+    const baseUrl = publicUrl || `${req.protocol}://${req.get('host')}`;
 
     const catalog = [];
 
@@ -562,9 +674,7 @@ app.get('/:tileset.json', async (req, res) => {
     const metadata = await pmtiles.getMetadata();
     const header = await pmtiles.getHeader();
 
-    const host = req.get('host');
-    const protocol = req.protocol;
-    const baseUrl = `${protocol}://${host}`;
+    const baseUrl = publicUrl || `${req.protocol}://${req.get('host')}`;
 
     const tilejson = {
       tilejson: '3.0.0',
@@ -628,6 +738,24 @@ app.listen(PORT, () => {
   }
   console.log(`Encoding: ${ENCODING}`);
   console.log(`Contour interval: ${CONTOUR_INTERVAL}m (major: ${MAJOR_INTERVAL}m)`);
+
+  // Show CORS configuration
+  if (corsOrigin) {
+    if (corsOrigin === '*') {
+      console.log(`CORS: All origins allowed`);
+    } else if (corsOrigin.includes(',')) {
+      console.log(`CORS: Multiple origins allowed`);
+      corsOrigin.split(',').forEach(o => console.log(`  - ${o.trim()}`));
+    } else {
+      console.log(`CORS: ${corsOrigin}`);
+    }
+  } else {
+    console.log(`CORS: All origins allowed (default)`);
+  }
+
+  if (publicUrl) {
+    console.log(`Public URL: ${publicUrl}`);
+  }
   console.log(`\nEndpoints:`);
   console.log(`  Catalog: http://localhost:${PORT}/`);
   console.log(`  TileJSON: http://localhost:${PORT}/{tileset}.json`);
@@ -638,5 +766,8 @@ app.listen(PORT, () => {
     console.log(`\nExample URLs (using "${firstTileset}"):`);
     console.log(`  http://localhost:${PORT}/${firstTileset}.json`);
     console.log(`  http://localhost:${PORT}/${firstTileset}/12/2048/2048.mvt`);
+    if (publicUrl) {
+      console.log(`\nPublic tile URLs will use: ${publicUrl}`);
+    }
   }
 });
