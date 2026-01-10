@@ -20,7 +20,20 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
 
-    if (arg === '--help' || arg === '-h') {
+    // Handle --option=value format
+    if (arg.startsWith('--') && arg.includes('=')) {
+      const [option, ...valueParts] = arg.split('=');
+      const value = valueParts.join('='); // In case value contains '='
+
+      if (option === '--public-url') {
+        args.publicUrl = value;
+      } else if (option === '--cors') {
+        args.cors = value;
+      } else {
+        console.error(`Error: Unknown option "${option}"`);
+        process.exit(1);
+      }
+    } else if (arg === '--help' || arg === '-h') {
       args.help = true;
     } else if (arg === '--public-url') {
       if (i + 1 >= argv.length) {
@@ -66,10 +79,10 @@ ARGUMENTS:
 
 OPTIONS:
   --help, -h               Show this help message
-  --public-url <url>       Base URL for tile endpoints (e.g., https://tiles.example.com)
-                          If not specified, uses the request host
-  --cors <origin>          CORS origin configuration
-                          "*" allows all origins (default)
+  --public-url=<url>       Base URL for tile endpoints (e.g., https://tiles.example.com)
+  --public-url <url>       If not specified, uses the request host
+  --cors=<origin>          CORS origin configuration
+  --cors <origin>          "*" allows all origins (default)
                           Specific origin: "https://example.com"
                           Multiple origins: "https://example.com,https://other.com"
 
@@ -83,14 +96,19 @@ EXAMPLES:
   # Start server with default settings
   pmtiles-contour-server ./pmtiles-data
 
-  # Use custom public URL for tile endpoints
+  # Use custom public URL for tile endpoints (both formats work)
+  pmtiles-contour-server --public-url=https://tiles.example.com ./pmtiles-data
   pmtiles-contour-server --public-url https://tiles.example.com ./pmtiles-data
 
-  # Allow specific origin for CORS
+  # Allow specific origin for CORS (both formats work)
+  pmtiles-contour-server --cors=https://example.com ./pmtiles-data
   pmtiles-contour-server --cors https://example.com ./pmtiles-data
 
+  # Allow all origins for CORS
+  pmtiles-contour-server --cors="*" ./pmtiles-data
+
   # Allow multiple origins for CORS
-  pmtiles-contour-server --cors "https://example.com,https://other.com" ./pmtiles-data
+  pmtiles-contour-server --cors="https://example.com,https://other.com" ./pmtiles-data
 
   # Use custom port and contour interval
   PORT=8080 CONTOUR_INTERVAL=20 pmtiles-contour-server ./pmtiles-data
